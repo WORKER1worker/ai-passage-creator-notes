@@ -12,6 +12,8 @@ type Config struct {
 	Database DatabaseConfig `mapstructure:"database"`
 	Redis    RedisConfig    `mapstructure:"redis"`
 	Session  SessionConfig  `mapstructure:"session"`
+	AI       AIConfig       `mapstructure:"ai"`
+	Pexels   PexelsConfig   `mapstructure:"pexels"`
 	Log      LogConfig      `mapstructure:"log"`
 }
 
@@ -44,6 +46,22 @@ type RedisConfig struct {
 type SessionConfig struct {
 	Secret string `mapstructure:"secret"`
 	MaxAge int    `mapstructure:"max_age"`
+}
+
+// AIConfig AI 配置
+type AIConfig struct {
+	DashScope DashScopeConfig `mapstructure:"dashscope"`
+}
+
+// DashScopeConfig 阿里云 DashScope 配置
+type DashScopeConfig struct {
+	APIKey string `mapstructure:"api_key"`
+	Model  string `mapstructure:"model"`
+}
+
+// PexelsConfig Pexels 配置
+type PexelsConfig struct {
+	APIKey string `mapstructure:"api_key"`
 }
 
 // LogConfig 日志配置

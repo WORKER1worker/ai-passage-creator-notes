@@ -21,3 +21,8 @@ const (
 	DefaultPageSize = 10
 	MaxPageSize     = 100
 )
+
+// 配额相关常量
+const (
+	DefaultQuota = 5 // 新用户默认配额
+)

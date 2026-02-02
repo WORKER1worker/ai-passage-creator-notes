@@ -125,3 +125,11 @@ func (s *UserStore) BuildQuery(id *int64, userAccount, userName, userProfile, us
 
 	return query
 }
+
+// DecrementQuota 原子扣减用户配额
+// 使用 quota > 0 条件确保并发安全，避免超扣
+// 返回影响行数：1表示成功，0表示配额不足
+func (s *UserStore) DecrementQuota(userID int64) (int64, error) {
+	result := s.db.Exec("UPDATE user SET quota = quota - 1 WHERE id = ? AND quota > 0", userID)
+	return result.RowsAffected, result.Error
+}

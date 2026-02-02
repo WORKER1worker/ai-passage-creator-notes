@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/yupi/ai-passage-creator/internal/common"
 	"github.com/yupi/ai-passage-creator/internal/config"
 	"github.com/yupi/ai-passage-creator/internal/handler"
 	"github.com/yupi/ai-passage-creator/internal/service"
@@ -19,8 +20,9 @@ type App struct {
 	DB     *gorm.DB
 
 	// Handlers
-	UserHandler   *handler.UserHandler
-	HealthHandler *handler.HealthHandler
+	UserHandler    *handler.UserHandler
+	ArticleHandler *handler.ArticleHandler
+	HealthHandler  *handler.HealthHandler
 
 	// Services (用于中间件)
 	UserService *service.UserService
@@ -36,16 +38,37 @@ func New(cfg *config.Config) (*App, error) {
 
 	// 初始化各层
 	userStore := store.NewUserStore(db)
+	articleStore := store.NewArticleStore(db)
+
+	// SSE 管理器
+	sseManager := common.NewSSEManager()
+
+	// 服务层
 	userService := service.NewUserService(userStore)
+	quotaService := service.NewQuotaService(userStore)
+	pexelsService := service.NewPexelsService(cfg)
+	cosService := service.NewCosService()
+
+	// 智能体服务
+	agentService, err := service.NewArticleAgentService(cfg, pexelsService, cosService, sseManager)
+	if err != nil {
+		return nil, fmt.Errorf("init agent service: %w", err)
+	}
+
+	articleService := service.NewArticleService(articleStore, agentService, quotaService, sseManager)
+
+	// 处理器层
 	userHandler := handler.NewUserHandler(userService)
+	articleHandler := handler.NewArticleHandler(articleService, userService, sseManager)
 	healthHandler := handler.NewHealthHandler()
 
 	return &App{
-		Config:        cfg,
-		DB:            db,
-		UserHandler:   userHandler,
-		HealthHandler: healthHandler,
-		UserService:   userService,
+		Config:         cfg,
+		DB:             db,
+		UserHandler:    userHandler,
+		ArticleHandler: articleHandler,
+		HealthHandler:  healthHandler,
+		UserService:    userService,
 	}, nil
 }
 
