@@ -13,6 +13,7 @@ type Config struct {
 	Redis      RedisConfig      `mapstructure:"redis"`
 	Session    SessionConfig    `mapstructure:"session"`
 	AI         AIConfig         `mapstructure:"ai"`
+	Agent      AgentConfig      `mapstructure:"agent"`
 	Pexels     PexelsConfig     `mapstructure:"pexels"`
 	Iconify    IconifyConfig    `mapstructure:"iconify"`
 	Mermaid    MermaidConfig    `mapstructure:"mermaid"`
@@ -64,6 +65,17 @@ type AIConfig struct {
 type DashScopeConfig struct {
 	APIKey string `mapstructure:"api_key"`
 	Model  string `mapstructure:"model"`
+}
+
+// AgentConfig 智能体配置
+type AgentConfig struct {
+	Orchestrator  OrchestratorConfig `mapstructure:"orchestrator"`
+	MaxIterations int                `mapstructure:"max_iterations"`
+}
+
+// OrchestratorConfig 智能体编排器配置
+type OrchestratorConfig struct {
+	Enabled bool `mapstructure:"enabled"` // 是否启用多智能体编排模式
 }
 
 // PexelsConfig Pexels 配置

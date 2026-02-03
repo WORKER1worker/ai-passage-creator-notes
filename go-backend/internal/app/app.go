@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/yupi/ai-passage-creator/internal/agent"
 	"github.com/yupi/ai-passage-creator/internal/common"
 	"github.com/yupi/ai-passage-creator/internal/config"
 	"github.com/yupi/ai-passage-creator/internal/handler"
@@ -100,7 +101,27 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("init agent service: %w", err)
 	}
 
-	articleService := service.NewArticleService(articleStore, agentService, quotaService, sseManager)
+	// 获取 LLM 实例（从 agentService 中获取，避免重复初始化）
+	// 注意：这里我们需要从 agentService 暴露 llm，或者重新创建一个
+	// 为了简化，我们创建多智能体编排器，它会在内部创建 LLM
+	orchestrator := agent.NewArticleAgentOrchestrator(
+		cfg,
+		agentService.GetLLM(), // 假设我们添加一个 GetLLM 方法
+		agentLogService,
+		sseManager,
+		imageStrategy,
+	)
+
+	log.Printf("智能体编排器初始化完成，启用状态: %v", cfg.Agent.Orchestrator.Enabled)
+
+	articleService := service.NewArticleService(
+		articleStore,
+		agentService,
+		orchestrator,
+		cfg,
+		quotaService,
+		sseManager,
+	)
 
 	// 支付服务
 	paymentService := service.NewPaymentService(&cfg.Stripe, userStore, paymentStore, db)

@@ -60,6 +60,11 @@ func maskAPIKey(key string) string {
 	return key[:10] + "***"
 }
 
+// GetLLM 获取 LLM 实例（用于共享给 Orchestrator）
+func (s *ArticleAgentService) GetLLM() llms.Model {
+	return s.llm
+}
+
 // Execute 执行完整的文章生成流程（保留用于旧版本兼容）
 func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleState) error {
 	// 智能体1：生成标题

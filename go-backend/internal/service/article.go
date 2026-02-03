@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/yupi/ai-passage-creator/internal/common"
+	"github.com/yupi/ai-passage-creator/internal/config"
 	"github.com/yupi/ai-passage-creator/internal/model"
 	"github.com/yupi/ai-passage-creator/internal/store"
 	"gorm.io/gorm"
@@ -16,19 +18,37 @@ import (
 
 // ArticleService 文章服务
 type ArticleService struct {
-	store      *store.ArticleStore
-	agentSvc   *ArticleAgentService
-	quotaSvc   *QuotaService
-	sseManager *common.SSEManager
+	store        *store.ArticleStore
+	agentSvc     *ArticleAgentService
+	orchestrator AgentOrchestrator // 新增：多智能体编排器
+	cfg          *config.Config    // 新增：配置对象
+	quotaSvc     *QuotaService
+	sseManager   *common.SSEManager
+}
+
+// AgentOrchestrator 智能体编排器接口（用于依赖注入）
+type AgentOrchestrator interface {
+	ExecutePhase1(ctx context.Context, state *model.ArticleState) error
+	ExecutePhase2(ctx context.Context, state *model.ArticleState, streamHandler func(string)) error
+	ExecutePhase3(ctx context.Context, state *model.ArticleState, streamHandler func(string)) error
 }
 
 // NewArticleService 创建文章服务
-func NewArticleService(st *store.ArticleStore, agentSvc *ArticleAgentService, quotaSvc *QuotaService, sseManager *common.SSEManager) *ArticleService {
+func NewArticleService(
+	st *store.ArticleStore,
+	agentSvc *ArticleAgentService,
+	orchestrator AgentOrchestrator,
+	cfg *config.Config,
+	quotaSvc *QuotaService,
+	sseManager *common.SSEManager,
+) *ArticleService {
 	return &ArticleService{
-		store:      st,
-		agentSvc:   agentSvc,
-		quotaSvc:   quotaSvc,
-		sseManager: sseManager,
+		store:        st,
+		agentSvc:     agentSvc,
+		orchestrator: orchestrator,
+		cfg:          cfg,
+		quotaSvc:     quotaSvc,
+		sseManager:   sseManager,
 	}
 }
 
@@ -167,7 +187,9 @@ func (s *ArticleService) Delete(id int64, userID int64, isAdmin bool) error {
 
 // ExecutePhase1Async 阶段1：异步生成标题方案
 func (s *ArticleService) ExecutePhase1Async(taskID, topic, style string) {
-	log.Printf("阶段1异步任务开始, taskId=%s, topic=%s, style=%s", taskID, topic, style)
+	useOrchestrator := s.cfg.Agent.Orchestrator.Enabled
+	log.Printf("阶段1异步任务开始, taskId=%s, topic=%s, style=%s, 使用多智能体编排=%v",
+		taskID, topic, style, useOrchestrator)
 
 	// 更新状态和阶段
 	_ = s.store.UpdateStatus(taskID, model.StatusProcessing, nil)
@@ -181,9 +203,14 @@ func (s *ArticleService) ExecutePhase1Async(taskID, topic, style string) {
 		Phase:  model.PhaseTitleGenerating,
 	}
 
-	// 执行智能体1：生成标题方案
+	// 执行智能体1：生成标题方案（根据配置选择执行方式）
 	ctx := context.Background()
-	err := s.agentSvc.ExecutePhase1(ctx, state)
+	var err error
+	if useOrchestrator {
+		err = s.orchestrator.ExecutePhase1(ctx, state)
+	} else {
+		err = s.agentSvc.ExecutePhase1(ctx, state)
+	}
 
 	if err != nil {
 		log.Printf("阶段1异步任务失败, taskId=%s, error=%v", taskID, err)
@@ -223,7 +250,8 @@ func (s *ArticleService) ExecutePhase1Async(taskID, topic, style string) {
 
 // ExecutePhase2Async 阶段2：异步生成大纲（用户确认标题后调用）
 func (s *ArticleService) ExecutePhase2Async(taskID string) {
-	log.Printf("阶段2异步任务开始, taskId=%s", taskID)
+	useOrchestrator := s.cfg.Agent.Orchestrator.Enabled
+	log.Printf("阶段2异步任务开始, taskId=%s, 使用多智能体编排=%v", taskID, useOrchestrator)
 
 	// 获取文章信息
 	article, err := s.store.GetByTaskID(taskID)
@@ -253,9 +281,15 @@ func (s *ArticleService) ExecutePhase2Async(taskID string) {
 		SubTitle:  *article.SubTitle,
 	}
 
-	// 执行智能体2：生成大纲
+	// 执行智能体2：生成大纲（根据配置选择执行方式）
 	ctx := context.Background()
-	err = s.agentSvc.ExecutePhase2(ctx, state)
+	if useOrchestrator {
+		err = s.orchestrator.ExecutePhase2(ctx, state, func(message string) {
+			s.handleStreamMessage(taskID, message)
+		})
+	} else {
+		err = s.agentSvc.ExecutePhase2(ctx, state)
+	}
 
 	if err != nil {
 		log.Printf("阶段2异步任务失败, taskId=%s, error=%v", taskID, err)
@@ -293,7 +327,8 @@ func (s *ArticleService) ExecutePhase2Async(taskID string) {
 
 // ExecutePhase3Async 阶段3：异步生成正文+配图（用户确认大纲后调用）
 func (s *ArticleService) ExecutePhase3Async(taskID string) {
-	log.Printf("阶段3异步任务开始, taskId=%s", taskID)
+	useOrchestrator := s.cfg.Agent.Orchestrator.Enabled
+	log.Printf("阶段3异步任务开始, taskId=%s, 使用多智能体编排=%v", taskID, useOrchestrator)
 
 	// 获取文章信息
 	article, err := s.store.GetByTaskID(taskID)
@@ -332,9 +367,16 @@ func (s *ArticleService) ExecutePhase3Async(taskID string) {
 		Sections: outlineSections,
 	}
 
-	// 执行智能体3-6：生成正文+配图
+	// 执行智能体3-6：生成正文+配图（根据配置选择执行方式）
+	// 多智能体编排模式支持配图并行生成
 	ctx := context.Background()
-	err = s.agentSvc.ExecutePhase3(ctx, state)
+	if useOrchestrator {
+		err = s.orchestrator.ExecutePhase3(ctx, state, func(message string) {
+			s.handleStreamMessage(taskID, message)
+		})
+	} else {
+		err = s.agentSvc.ExecutePhase3(ctx, state)
+	}
 
 	if err != nil {
 		log.Printf("阶段3异步任务失败, taskId=%s, error=%v", taskID, err)
@@ -523,6 +565,35 @@ func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, user *
 	}
 
 	return modifiedOutline, nil
+}
+
+// handleStreamMessage 处理流式消息
+// 解析流式消息并通过 SSE 推送给客户端
+func (s *ArticleService) handleStreamMessage(taskID, message string) {
+	// 如果消息包含冒号分隔符，说明是流式消息（格式：type:content）
+	if strings.Contains(message, ":") {
+		parts := strings.SplitN(message, ":", 2)
+		if len(parts) == 2 {
+			msgType := parts[0]
+			content := parts[1]
+			s.sseManager.Send(taskID, map[string]interface{}{
+				"type":    msgType,
+				"content": content,
+			})
+			return
+		}
+	}
+
+	// 尝试解析为 JSON
+	var jsonData map[string]interface{}
+	if err := json.Unmarshal([]byte(message), &jsonData); err == nil {
+		s.sseManager.Send(taskID, jsonData)
+	} else {
+		// 如果解析失败，作为普通消息发送
+		s.sseManager.Send(taskID, map[string]interface{}{
+			"message": message,
+		})
+	}
 }
 
 // processImageMethods 处理配图方式

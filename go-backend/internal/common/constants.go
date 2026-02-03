@@ -66,7 +66,7 @@ const (
 // Bing 表情包相关常量
 const (
 	BingImageSearchURL = "https://cn.bing.com/images/async"
-	EmojiPackSuffix    = "表情包"
+	EmojiPackSuffix    = "熊猫头表情包"
 	BingMaxImages      = 30
 )
 
