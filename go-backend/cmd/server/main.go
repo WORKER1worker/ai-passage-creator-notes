@@ -85,6 +85,9 @@ func main() {
 		article := api.Group("/article")
 		{
 			article.POST("/create", userAuth, application.ArticleHandler.Create)
+			article.POST("/confirm-title", userAuth, application.ArticleHandler.ConfirmTitle)
+			article.POST("/confirm-outline", userAuth, application.ArticleHandler.ConfirmOutline)
+			article.POST("/ai-modify-outline", userAuth, application.ArticleHandler.AiModifyOutline)
 			article.GET("/progress/:taskId", application.ArticleHandler.GetProgress)
 			article.GET("/:taskId", userAuth, application.ArticleHandler.Get)
 			article.POST("/list", userAuth, application.ArticleHandler.List)

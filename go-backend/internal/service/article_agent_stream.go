@@ -14,8 +14,16 @@ import (
 
 // agent2GenerateOutlineStream 智能体2：生成大纲（流式输出）
 func (s *ArticleAgentService) agent2GenerateOutlineStream(ctx context.Context, state *model.ArticleState) error {
+	// 构建 prompt，根据是否有用户补充描述插入对应部分
+	descriptionSection := ""
+	if state.UserDescription != "" {
+		descriptionSection = strings.ReplaceAll(common.Agent2DescriptionSection, "{userDescription}", state.UserDescription)
+	}
+
 	prompt := strings.ReplaceAll(common.Agent2OutlinePrompt, "{mainTitle}", state.Title.MainTitle)
 	prompt = strings.ReplaceAll(prompt, "{subTitle}", state.Title.SubTitle)
+	prompt = strings.ReplaceAll(prompt, "{descriptionSection}", descriptionSection)
+	prompt += s.getStylePrompt(state.Style)
 
 	var contentBuilder strings.Builder
 
@@ -28,7 +36,7 @@ func (s *ArticleAgentService) agent2GenerateOutlineStream(ctx context.Context, s
 
 		// 推送流式内容
 		s.sendMessage(state.TaskID, map[string]interface{}{
-			"type":    "AGENT2_STREAMING",
+			"type":    common.SSEMsgAgent2Streaming,
 			"content": text,
 		})
 		return nil

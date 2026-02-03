@@ -201,3 +201,88 @@ func (h *ArticleHandler) Delete(c *gin.Context) {
 
 	c.JSON(http.StatusOK, common.Success(true))
 }
+
+// ConfirmTitle 确认标题并输入补充描述
+func (h *ArticleHandler) ConfirmTitle(c *gin.Context) {
+	var req model.ConfirmTitleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, common.Error(common.ErrParams))
+		return
+	}
+
+	// 获取当前用户
+	session := sessions.Default(c)
+	user, err := h.userSvc.GetLoginUser(session)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+
+	// 判断是否管理员
+	isAdmin := user.UserRole == common.AdminRole
+
+	// 确认标题
+	if err := h.svc.ConfirmTitle(req.TaskID, req.SelectedMainTitle, req.SelectedSubTitle, req.UserDescription, user.ID, isAdmin); err != nil {
+		handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.Success(nil))
+}
+
+// ConfirmOutline 确认大纲
+func (h *ArticleHandler) ConfirmOutline(c *gin.Context) {
+	var req model.ConfirmOutlineRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, common.Error(common.ErrParams))
+		return
+	}
+
+	// 获取当前用户
+	session := sessions.Default(c)
+	user, err := h.userSvc.GetLoginUser(session)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+
+	// 判断是否管理员
+	isAdmin := user.UserRole == common.AdminRole
+
+	// 确认大纲
+	if err := h.svc.ConfirmOutline(req.TaskID, req.Outline, user.ID, isAdmin); err != nil {
+		handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.Success(nil))
+}
+
+// AiModifyOutline AI 修改大纲
+func (h *ArticleHandler) AiModifyOutline(c *gin.Context) {
+	var req model.AiModifyOutlineRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusOK, common.Error(common.ErrParams))
+		return
+	}
+
+	// 获取当前用户
+	session := sessions.Default(c)
+	user, err := h.userSvc.GetLoginUser(session)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+
+	// 判断是否管理员
+	isAdmin := user.UserRole == common.AdminRole
+
+	// AI 修改大纲
+	modifiedOutline, err := h.svc.AiModifyOutline(req.TaskID, req.ModifySuggestion, user.ID, isAdmin)
+	if err != nil {
+		handleError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, common.Success(modifiedOutline))
+}

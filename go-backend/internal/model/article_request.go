@@ -14,3 +14,23 @@ type QueryArticleRequest struct {
 	PageNum  int64   `json:"pageNum"`
 	PageSize int64   `json:"pageSize"`
 }
+
+// ConfirmTitleRequest 确认标题请求
+type ConfirmTitleRequest struct {
+	TaskID            string  `json:"taskId" binding:"required"`
+	SelectedMainTitle string  `json:"selectedMainTitle" binding:"required"`
+	SelectedSubTitle  string  `json:"selectedSubTitle" binding:"required"`
+	UserDescription   *string `json:"userDescription"` // 用户补充描述（可选）
+}
+
+// ConfirmOutlineRequest 确认大纲请求
+type ConfirmOutlineRequest struct {
+	TaskID  string           `json:"taskId" binding:"required"`
+	Outline []OutlineSection `json:"outline" binding:"required"`
+}
+
+// AiModifyOutlineRequest AI 修改大纲请求
+type AiModifyOutlineRequest struct {
+	TaskID           string `json:"taskId" binding:"required"`
+	ModifySuggestion string `json:"modifySuggestion" binding:"required"`
+}

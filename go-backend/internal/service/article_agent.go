@@ -57,7 +57,7 @@ func maskAPIKey(key string) string {
 	return key[:10] + "***"
 }
 
-// Execute 执行完整的文章生成流程
+// Execute 执行完整的文章生成流程（保留用于旧版本兼容）
 func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleState) error {
 	// 智能体1：生成标题
 	log.Printf("智能体1：开始生成标题, taskId=%s", state.TaskID)
@@ -65,7 +65,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 		return fmt.Errorf("agent1 failed: %w", err)
 	}
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type":  "AGENT1_COMPLETE",
+		"type":  common.SSEMsgAgent1Complete,
 		"title": state.Title,
 	})
 
@@ -75,7 +75,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 		return fmt.Errorf("agent2 failed: %w", err)
 	}
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type":    "AGENT2_COMPLETE",
+		"type":    common.SSEMsgAgent2Complete,
 		"outline": state.Outline.Sections,
 	})
 
@@ -85,7 +85,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 		return fmt.Errorf("agent3 failed: %w", err)
 	}
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type": "AGENT3_COMPLETE",
+		"type": common.SSEMsgAgent3Complete,
 	})
 
 	// 智能体4：分析配图需求
@@ -94,7 +94,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 		return fmt.Errorf("agent4 failed: %w", err)
 	}
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type":              "AGENT4_COMPLETE",
+		"type":              common.SSEMsgAgent4Complete,
 		"imageRequirements": state.ImageRequirements,
 	})
 
@@ -104,7 +104,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 		return fmt.Errorf("agent5 failed: %w", err)
 	}
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type":   "AGENT5_COMPLETE",
+		"type":   common.SSEMsgAgent5Complete,
 		"images": state.Images,
 	})
 
@@ -112,7 +112,7 @@ func (s *ArticleAgentService) Execute(ctx context.Context, state *model.ArticleS
 	log.Printf("开始图文合成, taskId=%s", state.TaskID)
 	s.mergeImagesIntoContent(state)
 	s.sendMessage(state.TaskID, map[string]interface{}{
-		"type":        "MERGE_COMPLETE",
+		"type":        common.SSEMsgMergeComplete,
 		"fullContent": state.FullContent,
 	})
 
@@ -193,7 +193,7 @@ func (s *ArticleAgentService) agent3GenerateContent(ctx context.Context, state *
 
 		// 推送流式内容
 		s.sendMessage(state.TaskID, map[string]interface{}{
-			"type":    "AGENT3_STREAMING",
+			"type":    common.SSEMsgAgent3Streaming,
 			"content": text,
 		})
 		return nil
@@ -290,7 +290,7 @@ func (s *ArticleAgentService) agent5GenerateImages(ctx context.Context, state *m
 
 		// 推送单张配图完成
 		s.sendMessage(state.TaskID, map[string]interface{}{
-			"type":  "IMAGE_COMPLETE",
+			"type":  common.SSEMsgImageComplete,
 			"image": imageResult,
 		})
 
@@ -389,6 +389,7 @@ func (s *ArticleAgentService) buildMethodUsageGuide(enabledMethods []string) str
 }
 
 // validateAndFilterImageRequirements 验证并过滤配图需求
+// 确保所有 imageSource 都在允许列表中
 func (s *ArticleAgentService) validateAndFilterImageRequirements(requirements []model.ImageRequirement, enabledMethods []string) []model.ImageRequirement {
 	// 如果 enabledMethods 为空，表示支持所有方式，不需要过滤
 	if len(enabledMethods) == 0 {
@@ -401,15 +402,191 @@ func (s *ArticleAgentService) validateAndFilterImageRequirements(requirements []
 		allowedSet[method] = true
 	}
 
-	// 过滤不在允许列表中的配图需求
+	// 验证并过滤配图需求
 	var validated []model.ImageRequirement
 	for _, req := range requirements {
-		if allowedSet[req.ImageSource] {
+		imageSource := req.ImageSource
+
+		// 验证 imageSource 是否在允许列表中
+		if allowedSet[imageSource] {
 			validated = append(validated, req)
+			log.Printf("配图需求验证通过, position=%d, imageSource=%s", req.Position, imageSource)
 		} else {
-			log.Printf("配图需求被过滤: imageSource=%s 不在允许列表中", req.ImageSource)
+			log.Printf("配图需求不符合限制被过滤, position=%d, imageSource=%s, enabledMethods=%v",
+				req.Position, imageSource, enabledMethods)
+
+			// 尝试替换为允许的方式（优先使用第一个允许的方式）
+			if len(enabledMethods) > 0 {
+				fallbackSource := enabledMethods[0]
+				req.ImageSource = fallbackSource
+				validated = append(validated, req)
+				log.Printf("配图需求已替换为允许的方式, position=%d, fallback=%s",
+					req.Position, fallbackSource)
+			}
 		}
 	}
 
 	return validated
+}
+
+// ExecutePhase1 阶段1：生成标题方案
+func (s *ArticleAgentService) ExecutePhase1(ctx context.Context, state *model.ArticleState) error {
+	log.Printf("阶段1：开始生成标题方案, taskId=%s", state.TaskID)
+
+	// 智能体1：生成标题方案
+	if err := s.agent1GenerateTitleOptions(ctx, state); err != nil {
+		return fmt.Errorf("agent1 failed: %w", err)
+	}
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type":         common.SSEMsgAgent1Complete,
+		"titleOptions": state.TitleOptions,
+	})
+
+	log.Printf("阶段1：标题方案生成完成, taskId=%s, optionsCount=%d", state.TaskID, len(state.TitleOptions))
+	return nil
+}
+
+// ExecutePhase2 阶段2：生成大纲
+func (s *ArticleAgentService) ExecutePhase2(ctx context.Context, state *model.ArticleState) error {
+	log.Printf("阶段2：开始生成大纲, taskId=%s", state.TaskID)
+
+	// 智能体2：生成大纲（流式）
+	if err := s.agent2GenerateOutlineStream(ctx, state); err != nil {
+		return fmt.Errorf("agent2 failed: %w", err)
+	}
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type":    common.SSEMsgAgent2Complete,
+		"outline": state.Outline.Sections,
+	})
+
+	log.Printf("阶段2：大纲生成完成, taskId=%s", state.TaskID)
+	return nil
+}
+
+// ExecutePhase3 阶段3：生成正文+配图
+func (s *ArticleAgentService) ExecutePhase3(ctx context.Context, state *model.ArticleState) error {
+	log.Printf("阶段3：开始生成正文+配图, taskId=%s", state.TaskID)
+
+	// 智能体3：生成正文（流式）
+	log.Printf("智能体3：开始生成正文, taskId=%s", state.TaskID)
+	if err := s.agent3GenerateContent(ctx, state); err != nil {
+		return fmt.Errorf("agent3 failed: %w", err)
+	}
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type": common.SSEMsgAgent3Complete,
+	})
+
+	// 智能体4：分析配图需求
+	log.Printf("智能体4：开始分析配图需求, taskId=%s", state.TaskID)
+	if err := s.agent4AnalyzeImageRequirements(ctx, state); err != nil {
+		return fmt.Errorf("agent4 failed: %w", err)
+	}
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type":              common.SSEMsgAgent4Complete,
+		"imageRequirements": state.ImageRequirements,
+	})
+
+	// 智能体5：生成配图
+	log.Printf("智能体5：开始生成配图, taskId=%s", state.TaskID)
+	if err := s.agent5GenerateImages(ctx, state); err != nil {
+		return fmt.Errorf("agent5 failed: %w", err)
+	}
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type":   common.SSEMsgAgent5Complete,
+		"images": state.Images,
+	})
+
+	// 图文合成：将配图插入正文
+	log.Printf("开始图文合成, taskId=%s", state.TaskID)
+	s.mergeImagesIntoContent(state)
+	s.sendMessage(state.TaskID, map[string]interface{}{
+		"type":        common.SSEMsgMergeComplete,
+		"fullContent": state.FullContent,
+	})
+
+	log.Printf("阶段3：正文生成完成, taskId=%s", state.TaskID)
+	return nil
+}
+
+// agent1GenerateTitleOptions 智能体1：生成标题方案（3-5个）
+func (s *ArticleAgentService) agent1GenerateTitleOptions(ctx context.Context, state *model.ArticleState) error {
+	// 构建 prompt
+	prompt := strings.ReplaceAll(common.Agent1TitlePrompt, "{topic}", state.Topic)
+	prompt += s.getStylePrompt(state.Style)
+
+	log.Printf("智能体1：发送请求到 LLM, promptLength=%d", len(prompt))
+
+	// 调用 LLM
+	content, err := llms.GenerateFromSinglePrompt(ctx, s.llm, prompt)
+	if err != nil {
+		log.Printf("智能体1：LLM 调用失败, error=%v", err)
+		return fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	log.Printf("智能体1：收到响应, contentLength=%d, content preview=%s...", len(content), truncateString(content, 100))
+
+	// 解析标题方案列表
+	var titleOptions []model.TitleOption
+	if err := json.Unmarshal([]byte(content), &titleOptions); err != nil {
+		log.Printf("智能体1：标题方案解析失败, content=%s", content)
+		return fmt.Errorf("parse title options: %w", err)
+	}
+
+	state.TitleOptions = titleOptions
+	log.Printf("智能体1：标题方案生成成功, optionsCount=%d", len(titleOptions))
+	return nil
+}
+
+// AiModifyOutline AI 修改大纲
+func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, mainTitle, subTitle string, currentOutline []model.OutlineSection, modifySuggestion string) ([]model.OutlineSection, error) {
+	// 构建当前大纲 JSON
+	currentOutlineJSON, _ := json.Marshal(currentOutline)
+
+	// 构建 prompt
+	prompt := common.AiModifyOutlinePrompt
+	prompt = strings.ReplaceAll(prompt, "{mainTitle}", mainTitle)
+	prompt = strings.ReplaceAll(prompt, "{subTitle}", subTitle)
+	prompt = strings.ReplaceAll(prompt, "{currentOutline}", string(currentOutlineJSON))
+	prompt = strings.ReplaceAll(prompt, "{modifySuggestion}", modifySuggestion)
+
+	log.Printf("AI修改大纲：发送请求到 LLM, promptLength=%d", len(prompt))
+
+	// 调用 LLM
+	content, err := llms.GenerateFromSinglePrompt(ctx, s.llm, prompt)
+	if err != nil {
+		log.Printf("AI修改大纲：LLM 调用失败, error=%v", err)
+		return nil, fmt.Errorf("LLM call failed: %w", err)
+	}
+
+	log.Printf("AI修改大纲：收到响应, contentLength=%d", len(content))
+
+	// 解析修改后的大纲
+	var outlineResult model.OutlineResult
+	if err := json.Unmarshal([]byte(content), &outlineResult); err != nil {
+		log.Printf("AI修改大纲：大纲解析失败, content=%s", content)
+		return nil, fmt.Errorf("parse outline: %w", err)
+	}
+
+	log.Printf("AI修改大纲成功, sectionsCount=%d", len(outlineResult.Sections))
+	return outlineResult.Sections, nil
+}
+
+// getStylePrompt 根据风格获取对应的 Prompt 附加内容
+func (s *ArticleAgentService) getStylePrompt(style string) string {
+	if style == "" {
+		return ""
+	}
+
+	switch style {
+	case common.ArticleStyleTech:
+		return common.StyleTechPrompt
+	case common.ArticleStyleEmotional:
+		return common.StyleEmotionalPrompt
+	case common.ArticleStyleEducational:
+		return common.StyleEducationalPrompt
+	case common.ArticleStyleHumorous:
+		return common.StyleHumorousPrompt
+	default:
+		return ""
+	}
 }

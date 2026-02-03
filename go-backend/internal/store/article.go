@@ -93,3 +93,13 @@ func (s *ArticleStore) List(userID *int64, status *string, isAdmin bool, pageNum
 
 	return articles, total, nil
 }
+
+// UpdatePhase 更新文章阶段
+func (s *ArticleStore) UpdatePhase(taskID, phase string) error {
+	return s.db.Model(&model.Article{}).Where("taskId = ?", taskID).Update("phase", phase).Error
+}
+
+// UpdateTitleOptions 更新标题方案
+func (s *ArticleStore) UpdateTitleOptions(taskID, titleOptions string) error {
+	return s.db.Model(&model.Article{}).Where("taskId = ?", taskID).Update("titleOptions", titleOptions).Error
+}
