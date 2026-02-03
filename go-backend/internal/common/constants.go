@@ -5,6 +5,7 @@ const (
 	UserLoginState = "userLoginState"
 	AdminRole      = "admin"
 	UserRole       = "user"
+	VIPRole        = "vip"
 )
 
 // 密码相关常量

@@ -93,6 +93,21 @@ func main() {
 			article.POST("/list", userAuth, application.ArticleHandler.List)
 			article.POST("/delete", userAuth, application.ArticleHandler.Delete)
 		}
+
+		// 支付路由（需要登录）
+		payment := api.Group("/payment")
+		payment.Use(userAuth)
+		{
+			payment.POST("/create-vip-session", application.PaymentHandler.CreateVipSession)
+			payment.POST("/refund", application.PaymentHandler.Refund)
+			payment.GET("/records", application.PaymentHandler.GetRecords)
+		}
+
+		// Webhook 路由（不需要认证）
+		webhook := api.Group("/webhook")
+		{
+			webhook.POST("/stripe", application.WebhookHandler.HandleStripeWebhook)
+		}
 	}
 
 	// 启动服务器

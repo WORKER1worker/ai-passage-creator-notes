@@ -20,8 +20,8 @@ func NewQuotaService(userStore *store.UserStore) *QuotaService {
 
 // HasQuota 检查用户是否有足够的配额
 func (s *QuotaService) HasQuota(user *model.User) bool {
-	// 管理员无限配额
-	if s.isAdmin(user) {
+	// 管理员和 VIP 用户无限配额
+	if s.isAdmin(user) || s.isVIP(user) {
 		return true
 	}
 
@@ -36,8 +36,8 @@ func (s *QuotaService) HasQuota(user *model.User) bool {
 
 // ConsumeQuota 消耗配额（扣减1次）
 func (s *QuotaService) ConsumeQuota(user *model.User) {
-	// 管理员不消耗配额
-	if s.isAdmin(user) {
+	// 管理员和 VIP 用户不消耗配额
+	if s.isAdmin(user) || s.isVIP(user) {
 		return
 	}
 
@@ -54,8 +54,8 @@ func (s *QuotaService) ConsumeQuota(user *model.User) {
 // CheckAndConsumeQuota 检查并消耗配额（原子操作）
 // 如果配额不足会返回错误
 func (s *QuotaService) CheckAndConsumeQuota(user *model.User) error {
-	// 管理员跳过检查
-	if s.isAdmin(user) {
+	// 管理员和 VIP 用户跳过检查
+	if s.isAdmin(user) || s.isVIP(user) {
 		return nil
 	}
 
@@ -77,4 +77,9 @@ func (s *QuotaService) CheckAndConsumeQuota(user *model.User) error {
 // isAdmin 判断是否为管理员
 func (s *QuotaService) isAdmin(user *model.User) bool {
 	return user.UserRole == common.AdminRole
+}
+
+// isVIP 判断是否为 VIP
+func (s *QuotaService) isVIP(user *model.User) bool {
+	return user.UserRole == common.VIPRole
 }

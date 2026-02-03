@@ -20,6 +20,7 @@ type Config struct {
 	SVGDiagram SVGDiagramConfig `mapstructure:"svg_diagram"`
 	EmojiPack  EmojiPackConfig  `mapstructure:"emoji_pack"`
 	COS        COSConfig        `mapstructure:"cos"`
+	Stripe     StripeConfig     `mapstructure:"stripe"`
 	Log        LogConfig        `mapstructure:"log"`
 }
 
@@ -112,6 +113,14 @@ type COSConfig struct {
 	Region    string `mapstructure:"region"`
 	Bucket    string `mapstructure:"bucket"`
 	Domain    string `mapstructure:"domain"` // CDN 域名（可选）
+}
+
+// StripeConfig Stripe 支付配置
+type StripeConfig struct {
+	APIKey        string `mapstructure:"api_key"`
+	WebhookSecret string `mapstructure:"webhook_secret"`
+	SuccessURL    string `mapstructure:"success_url"`
+	CancelURL     string `mapstructure:"cancel_url"`
 }
 
 // LogConfig 日志配置

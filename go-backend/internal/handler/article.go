@@ -278,7 +278,7 @@ func (h *ArticleHandler) AiModifyOutline(c *gin.Context) {
 	isAdmin := user.UserRole == common.AdminRole
 
 	// AI 修改大纲
-	modifiedOutline, err := h.svc.AiModifyOutline(req.TaskID, req.ModifySuggestion, user.ID, isAdmin)
+	modifiedOutline, err := h.svc.AiModifyOutline(req.TaskID, req.ModifySuggestion, user, isAdmin)
 	if err != nil {
 		handleError(c, err)
 		return

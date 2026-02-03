@@ -23,6 +23,8 @@ type App struct {
 	UserHandler    *handler.UserHandler
 	ArticleHandler *handler.ArticleHandler
 	HealthHandler  *handler.HealthHandler
+	PaymentHandler *handler.PaymentHandler
+	WebhookHandler *handler.WebhookHandler
 
 	// Services (用于中间件)
 	UserService *service.UserService
@@ -39,6 +41,7 @@ func New(cfg *config.Config) (*App, error) {
 	// 初始化各层
 	userStore := store.NewUserStore(db)
 	articleStore := store.NewArticleStore(db)
+	paymentStore := store.NewPaymentStore(db)
 
 	// SSE 管理器
 	sseManager := common.NewSSEManager()
@@ -86,10 +89,15 @@ func New(cfg *config.Config) (*App, error) {
 
 	articleService := service.NewArticleService(articleStore, agentService, quotaService, sseManager)
 
+	// 支付服务
+	paymentService := service.NewPaymentService(&cfg.Stripe, userStore, paymentStore, db)
+
 	// 处理器层
 	userHandler := handler.NewUserHandler(userService)
 	articleHandler := handler.NewArticleHandler(articleService, userService, sseManager)
 	healthHandler := handler.NewHealthHandler()
+	paymentHandler := handler.NewPaymentHandler(paymentService)
+	webhookHandler := handler.NewWebhookHandler(paymentService)
 
 	return &App{
 		Config:         cfg,
@@ -97,6 +105,8 @@ func New(cfg *config.Config) (*App, error) {
 		UserHandler:    userHandler,
 		ArticleHandler: articleHandler,
 		HealthHandler:  healthHandler,
+		PaymentHandler: paymentHandler,
+		WebhookHandler: webhookHandler,
 		UserService:    userService,
 	}, nil
 }

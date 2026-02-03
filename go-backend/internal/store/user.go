@@ -1,6 +1,8 @@
 package store
 
 import (
+	"time"
+
 	"github.com/yupi/ai-passage-creator/internal/model"
 	"gorm.io/gorm"
 )
@@ -132,4 +134,24 @@ func (s *UserStore) BuildQuery(id *int64, userAccount, userName, userProfile, us
 func (s *UserStore) DecrementQuota(userID int64) (int64, error) {
 	result := s.db.Exec("UPDATE user SET quota = quota - 1 WHERE id = ? AND quota > 0", userID)
 	return result.RowsAffected, result.Error
+}
+
+// UpgradeToVIP 升级用户为 VIP
+func (s *UserStore) UpgradeToVIP(userID int64) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"vipTime":  now,
+		"userRole": "vip",
+	}
+	return s.db.Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error
+}
+
+// RevokeVIP 撤销用户 VIP 身份
+func (s *UserStore) RevokeVIP(userID int64, defaultQuota int) error {
+	updates := map[string]interface{}{
+		"vipTime":  nil,
+		"userRole": "user",
+		"quota":    defaultQuota,
+	}
+	return s.db.Model(&model.User{}).Where("id = ?", userID).Updates(updates).Error
 }

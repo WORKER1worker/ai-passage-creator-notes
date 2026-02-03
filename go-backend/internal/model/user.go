@@ -12,6 +12,7 @@ type User struct {
 	UserProfile  *string    `gorm:"column:userProfile" json:"userProfile"`
 	UserRole     string     `gorm:"column:userRole;default:user" json:"userRole"`
 	Quota        int        `gorm:"column:quota;default:5" json:"quota"`
+	VipTime      *time.Time `gorm:"column:vipTime" json:"vipTime"`
 	EditTime     *time.Time `gorm:"column:editTime" json:"editTime"`
 	CreateTime   time.Time  `gorm:"column:createTime;autoCreateTime" json:"createTime"`
 	UpdateTime   time.Time  `gorm:"column:updateTime;autoUpdateTime" json:"updateTime"`
@@ -32,6 +33,7 @@ type LoginUser struct {
 	UserProfile *string    `json:"userProfile"`
 	UserRole    string     `json:"userRole"`
 	Quota       int        `json:"quota"`
+	VipTime     *time.Time `json:"vipTime"`
 	CreateTime  time.Time  `json:"createTime"`
 	UpdateTime  time.Time  `json:"updateTime"`
 	EditTime    *time.Time `json:"editTime"`
@@ -45,6 +47,7 @@ type UserInfo struct {
 	UserAvatar  *string    `json:"userAvatar"`
 	UserProfile *string    `json:"userProfile"`
 	UserRole    string     `json:"userRole"`
+	VipTime     *time.Time `json:"vipTime"`
 	CreateTime  time.Time  `json:"createTime"`
 	UpdateTime  time.Time  `json:"updateTime"`
 	EditTime    *time.Time `json:"editTime"`
@@ -63,6 +66,7 @@ func (u *User) ToLoginUser() *LoginUser {
 		UserProfile: u.UserProfile,
 		UserRole:    u.UserRole,
 		Quota:       u.Quota,
+		VipTime:     u.VipTime,
 		CreateTime:  u.CreateTime,
 		UpdateTime:  u.UpdateTime,
 		EditTime:    u.EditTime,
@@ -81,6 +85,7 @@ func (u *User) ToUserInfo() *UserInfo {
 		UserAvatar:  u.UserAvatar,
 		UserProfile: u.UserProfile,
 		UserRole:    u.UserRole,
+		VipTime:     u.VipTime,
 		CreateTime:  u.CreateTime,
 		UpdateTime:  u.UpdateTime,
 		EditTime:    u.EditTime,
@@ -93,9 +98,10 @@ type UserRole string
 const (
 	RoleUser  UserRole = "user"
 	RoleAdmin UserRole = "admin"
+	RoleVIP   UserRole = "vip"
 )
 
 // IsValid 判断角色是否有效
 func (r UserRole) IsValid() bool {
-	return r == RoleUser || r == RoleAdmin
+	return r == RoleUser || r == RoleAdmin || r == RoleVIP
 }

@@ -38,6 +38,14 @@ func (s *ArticleService) Create(user *model.User, req *model.CreateArticleReques
 		return "", common.ErrParams.WithMessage("选题不能为空")
 	}
 
+	// 处理配图方式（如果用户未选择，给普通用户设置默认的非 VIP 方式）
+	finalImageMethods := s.processImageMethods(req.EnabledImageMethods, user)
+
+	// 校验配图方式权限（普通用户不能使用 NANO_BANANA 和 SVG_DIAGRAM）
+	if err := s.validateImageMethods(finalImageMethods, user); err != nil {
+		return "", err
+	}
+
 	// 检查并消耗配额（原子操作）
 	if err := s.quotaSvc.CheckAndConsumeQuota(user); err != nil {
 		return "", err
@@ -48,8 +56,8 @@ func (s *ArticleService) Create(user *model.User, req *model.CreateArticleReques
 
 	// 将 enabledImageMethods 转为 JSON（为空时设置为 nil）
 	var methodsJSON *string
-	if len(req.EnabledImageMethods) > 0 {
-		methodsBytes, _ := json.Marshal(req.EnabledImageMethods)
+	if len(finalImageMethods) > 0 {
+		methodsBytes, _ := json.Marshal(finalImageMethods)
 		methodsStr := string(methodsBytes)
 		methodsJSON = &methodsStr
 	}
@@ -474,7 +482,7 @@ func (s *ArticleService) SaveTitleOptions(taskID string, titleOptions []model.Ti
 }
 
 // AiModifyOutline AI 修改大纲
-func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, userID int64, isAdmin bool) ([]model.OutlineSection, error) {
+func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, user *model.User, isAdmin bool) ([]model.OutlineSection, error) {
 	// 获取文章
 	article, err := s.store.GetByTaskID(taskID)
 	if err != nil {
@@ -485,8 +493,13 @@ func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, userID
 	}
 
 	// 权限校验
-	if !isAdmin && article.UserID != userID {
+	if !isAdmin && article.UserID != user.ID {
 		return nil, common.ErrNoAuth
+	}
+
+	// 校验 VIP 权限
+	if !s.isVipOrAdmin(user) {
+		return nil, common.ErrNoAuth.WithMessage("AI 修改大纲功能仅限 VIP 会员使用")
 	}
 
 	// 校验当前阶段
@@ -510,4 +523,53 @@ func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, userID
 	}
 
 	return modifiedOutline, nil
+}
+
+// processImageMethods 处理配图方式
+// 如果用户未选择，给普通用户设置默认的非 VIP 方式，VIP 和管理员不限制
+func (s *ArticleService) processImageMethods(methods []string, user *model.User) []string {
+	// 如果用户已选择，直接返回
+	if len(methods) > 0 {
+		return methods
+	}
+
+	// VIP 和管理员：不限制，返回 nil 表示支持所有方式
+	if s.isVipOrAdmin(user) {
+		return nil
+	}
+
+	// 普通用户：返回默认的非 VIP 方式
+	return []string{
+		common.ImageMethodPexels,
+		common.ImageMethodMermaid,
+		common.ImageMethodIconify,
+		common.ImageMethodEmojiPack,
+	}
+}
+
+// validateImageMethods 校验配图方式权限
+// 普通用户不能使用 NANO_BANANA 和 SVG_DIAGRAM
+func (s *ArticleService) validateImageMethods(methods []string, user *model.User) error {
+	if len(methods) == 0 {
+		return nil
+	}
+
+	// VIP 和管理员无限制
+	if s.isVipOrAdmin(user) {
+		return nil
+	}
+
+	// 普通用户限制
+	for _, method := range methods {
+		if method == common.ImageMethodNanoBanana || method == common.ImageMethodSVGDiagram {
+			return common.ErrNoAuth.WithMessage("高级配图功能（AI 生图、SVG 图表）仅限 VIP 会员使用")
+		}
+	}
+
+	return nil
+}
+
+// isVipOrAdmin 判断是否为 VIP 或管理员
+func (s *ArticleService) isVipOrAdmin(user *model.User) bool {
+	return user.UserRole == common.AdminRole || user.UserRole == common.VIPRole
 }

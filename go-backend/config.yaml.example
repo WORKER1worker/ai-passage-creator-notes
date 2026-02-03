@@ -73,6 +73,13 @@ cos:
   bucket: "your-bucket-name"
   domain: ""  # CDN 加速域名（可选），如：https://cdn.example.com
 
+# Stripe 支付配置
+stripe:
+  api_key: "sk_test_your_stripe_secret_key"  # https://dashboard.stripe.com/test/apikeys
+  webhook_secret: "whsec_your_webhook_secret"  # Webhook 签名密钥
+  success_url: "http://localhost:5173/vip?success=true"  # 支付成功回调 URL
+  cancel_url: "http://localhost:5173/vip?cancelled=true"  # 支付取消回调 URL
+
 log:
   level: info  # debug, info, warn, error
   file_path: logs/app.log
