@@ -14,17 +14,19 @@ import (
 
 // ArticleHandler 文章处理器
 type ArticleHandler struct {
-	svc        *service.ArticleService
-	userSvc    *service.UserService
-	sseManager *common.SSEManager
+	svc             *service.ArticleService
+	userSvc         *service.UserService
+	agentLogService *service.AgentLogService
+	sseManager      *common.SSEManager
 }
 
 // NewArticleHandler 创建文章处理器
-func NewArticleHandler(svc *service.ArticleService, userSvc *service.UserService, sseManager *common.SSEManager) *ArticleHandler {
+func NewArticleHandler(svc *service.ArticleService, userSvc *service.UserService, agentLogService *service.AgentLogService, sseManager *common.SSEManager) *ArticleHandler {
 	return &ArticleHandler{
-		svc:        svc,
-		userSvc:    userSvc,
-		sseManager: sseManager,
+		svc:             svc,
+		userSvc:         userSvc,
+		agentLogService: agentLogService,
+		sseManager:      sseManager,
 	}
 }
 
@@ -285,4 +287,22 @@ func (h *ArticleHandler) AiModifyOutline(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, common.Success(modifiedOutline))
+}
+
+// GetExecutionLogs 获取任务执行日志
+func (h *ArticleHandler) GetExecutionLogs(c *gin.Context) {
+	taskID := c.Param("taskId")
+	if taskID == "" {
+		c.JSON(http.StatusOK, common.Error(common.ErrParams.WithMessage("任务ID不能为空")))
+		return
+	}
+
+	// 获取执行统计
+	stats, err := h.agentLogService.GetExecutionStats(taskID)
+	if err != nil {
+		c.JSON(http.StatusOK, common.Error(common.ErrSystem.WithMessage("获取执行日志失败: "+err.Error())))
+		return
+	}
+
+	c.JSON(http.StatusOK, common.Success(stats))
 }

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/yupi/ai-passage-creator/internal/common"
 	"github.com/yupi/ai-passage-creator/internal/config"
 	"github.com/yupi/ai-passage-creator/internal/handler"
@@ -16,15 +18,17 @@ import (
 
 // App 应用程序
 type App struct {
-	Config *config.Config
-	DB     *gorm.DB
+	Config      *config.Config
+	DB          *gorm.DB
+	RedisClient *redis.Client
 
 	// Handlers
-	UserHandler    *handler.UserHandler
-	ArticleHandler *handler.ArticleHandler
-	HealthHandler  *handler.HealthHandler
-	PaymentHandler *handler.PaymentHandler
-	WebhookHandler *handler.WebhookHandler
+	UserHandler       *handler.UserHandler
+	ArticleHandler    *handler.ArticleHandler
+	HealthHandler     *handler.HealthHandler
+	PaymentHandler    *handler.PaymentHandler
+	WebhookHandler    *handler.WebhookHandler
+	StatisticsHandler *handler.StatisticsHandler
 
 	// Services (用于中间件)
 	UserService *service.UserService
@@ -38,10 +42,17 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, fmt.Errorf("init database: %w", err)
 	}
 
+	// 初始化 Redis
+	redisClient, err := initRedis(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("init redis: %w", err)
+	}
+
 	// 初始化各层
 	userStore := store.NewUserStore(db)
 	articleStore := store.NewArticleStore(db)
 	paymentStore := store.NewPaymentStore(db)
+	agentLogStore := store.NewAgentLogStore(db)
 
 	// SSE 管理器
 	sseManager := common.NewSSEManager()
@@ -49,6 +60,8 @@ func New(cfg *config.Config) (*App, error) {
 	// 服务层
 	userService := service.NewUserService(userStore)
 	quotaService := service.NewQuotaService(userStore)
+	agentLogService := service.NewAgentLogService(agentLogStore)
+	statisticsService := service.NewStatisticsService(db, userStore, articleStore, redisClient)
 
 	// COS 服务（判断是否已配置）
 	cosEnabled := cfg.COS.Bucket != "" && cfg.COS.SecretID != "" && cfg.COS.SecretKey != ""
@@ -81,8 +94,8 @@ func New(cfg *config.Config) (*App, error) {
 
 	log.Println("图片服务策略初始化完成，已注册 7 个图片服务（含降级服务）")
 
-	// 智能体服务
-	agentService, err := service.NewArticleAgentService(cfg, imageStrategy, sseManager)
+	// 智能体服务（注入 agentLogService）
+	agentService, err := service.NewArticleAgentService(cfg, imageStrategy, agentLogService, sseManager)
 	if err != nil {
 		return nil, fmt.Errorf("init agent service: %w", err)
 	}
@@ -94,20 +107,23 @@ func New(cfg *config.Config) (*App, error) {
 
 	// 处理器层
 	userHandler := handler.NewUserHandler(userService)
-	articleHandler := handler.NewArticleHandler(articleService, userService, sseManager)
+	articleHandler := handler.NewArticleHandler(articleService, userService, agentLogService, sseManager)
 	healthHandler := handler.NewHealthHandler()
 	paymentHandler := handler.NewPaymentHandler(paymentService)
 	webhookHandler := handler.NewWebhookHandler(paymentService)
+	statisticsHandler := handler.NewStatisticsHandler(statisticsService)
 
 	return &App{
-		Config:         cfg,
-		DB:             db,
-		UserHandler:    userHandler,
-		ArticleHandler: articleHandler,
-		HealthHandler:  healthHandler,
-		PaymentHandler: paymentHandler,
-		WebhookHandler: webhookHandler,
-		UserService:    userService,
+		Config:            cfg,
+		DB:                db,
+		RedisClient:       redisClient,
+		UserHandler:       userHandler,
+		ArticleHandler:    articleHandler,
+		HealthHandler:     healthHandler,
+		PaymentHandler:    paymentHandler,
+		WebhookHandler:    webhookHandler,
+		StatisticsHandler: statisticsHandler,
+		UserService:       userService,
 	}, nil
 }
 
@@ -134,11 +150,41 @@ func initDB(cfg *config.Config) (*gorm.DB, error) {
 	return db, nil
 }
 
+// initRedis 初始化 Redis
+func initRedis(cfg *config.Config) (*redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.GetRedisAddr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
+	// 测试连接
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("redis ping: %w", err)
+	}
+
+	log.Println("redis connected")
+	return client, nil
+}
+
 // Close 关闭资源
 func (a *App) Close() error {
+	// 关闭数据库
 	sqlDB, err := a.DB.DB()
 	if err != nil {
 		return err
 	}
-	return sqlDB.Close()
+	if err := sqlDB.Close(); err != nil {
+		return err
+	}
+
+	// 关闭 Redis
+	if a.RedisClient != nil {
+		if err := a.RedisClient.Close(); err != nil {
+			log.Printf("close redis: %v", err)
+		}
+	}
+
+	return nil
 }

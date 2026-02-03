@@ -517,7 +517,7 @@ func (s *ArticleService) AiModifyOutline(taskID, modifySuggestion string, user *
 
 	// 调用智能体修改大纲
 	ctx := context.Background()
-	modifiedOutline, err := s.agentSvc.AiModifyOutline(ctx, *article.MainTitle, *article.SubTitle, currentOutline, modifySuggestion)
+	modifiedOutline, err := s.agentSvc.AiModifyOutline(ctx, taskID, *article.MainTitle, *article.SubTitle, currentOutline, modifySuggestion)
 	if err != nil {
 		return nil, common.ErrOperation.WithMessage("AI修改大纲失败: " + err.Error())
 	}

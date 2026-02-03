@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -16,14 +17,15 @@ import (
 
 // ArticleAgentService 文章智能体编排服务
 type ArticleAgentService struct {
-	llm           llms.Model
-	imageStrategy *ImageServiceStrategy
-	sseManager    *common.SSEManager
+	llm             llms.Model
+	imageStrategy   *ImageServiceStrategy
+	agentLogService *AgentLogService
+	sseManager      *common.SSEManager
 }
 
 // NewArticleAgentService 创建文章智能体服务
 // 使用 LangChainGo OpenAI 客户端连接 DashScope（OpenAI 兼容）
-func NewArticleAgentService(cfg *config.Config, imageStrategy *ImageServiceStrategy, sseManager *common.SSEManager) (*ArticleAgentService, error) {
+func NewArticleAgentService(cfg *config.Config, imageStrategy *ImageServiceStrategy, agentLogService *AgentLogService, sseManager *common.SSEManager) (*ArticleAgentService, error) {
 	baseURL := "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 	// 添加调试日志
@@ -43,9 +45,10 @@ func NewArticleAgentService(cfg *config.Config, imageStrategy *ImageServiceStrat
 	log.Printf("DashScope 客户端初始化成功")
 
 	return &ArticleAgentService{
-		llm:           llm,
-		imageStrategy: imageStrategy,
-		sseManager:    sseManager,
+		llm:             llm,
+		imageStrategy:   imageStrategy,
+		agentLogService: agentLogService,
+		sseManager:      sseManager,
 	}, nil
 }
 
@@ -177,10 +180,29 @@ func (s *ArticleAgentService) agent2GenerateOutline(ctx context.Context, state *
 
 // agent3GenerateContent 智能体3：生成正文（流式）
 func (s *ArticleAgentService) agent3GenerateContent(ctx context.Context, state *model.ArticleState) error {
+	// 创建日志记录
+	startTime := time.Now()
+	agentLog := &model.AgentLog{
+		TaskID:    state.TaskID,
+		AgentName: "agent3_generate_content",
+		StartTime: startTime,
+		Status:    "RUNNING",
+	}
+
+	// 使用 defer 确保日志一定会被保存
+	defer func() {
+		endTime := time.Now()
+		agentLog.EndTime = &endTime
+		duration := int(time.Since(startTime).Milliseconds())
+		agentLog.DurationMs = &duration
+		s.agentLogService.SaveLogAsync(agentLog)
+	}()
+
 	outlineJSON, _ := json.Marshal(state.Outline.Sections)
 	prompt := strings.ReplaceAll(common.Agent3ContentPrompt, "{mainTitle}", state.Title.MainTitle)
 	prompt = strings.ReplaceAll(prompt, "{subTitle}", state.Title.SubTitle)
 	prompt = strings.ReplaceAll(prompt, "{outline}", string(outlineJSON))
+	agentLog.Prompt = &prompt
 
 	var contentBuilder strings.Builder
 
@@ -200,16 +222,45 @@ func (s *ArticleAgentService) agent3GenerateContent(ctx context.Context, state *
 	}))
 
 	if err != nil {
+		agentLog.Status = "FAILED"
+		errMsg := err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return err
 	}
 
 	state.Content = contentBuilder.String()
+	agentLog.Status = "SUCCESS"
+	// 将输出数据转换为 JSON 格式
+	outputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"contentLength": len(state.Content),
+		"message":       fmt.Sprintf("正文长度: %d 字符", len(state.Content)),
+	})
+	outputDataStr := string(outputDataJSON)
+	agentLog.OutputData = &outputDataStr
 	log.Printf("智能体3：正文生成成功, length=%d", len(state.Content))
 	return nil
 }
 
 // agent4AnalyzeImageRequirements 智能体4：分析配图需求（占位符方案）
 func (s *ArticleAgentService) agent4AnalyzeImageRequirements(ctx context.Context, state *model.ArticleState) error {
+	// 创建日志记录
+	startTime := time.Now()
+	agentLog := &model.AgentLog{
+		TaskID:    state.TaskID,
+		AgentName: "agent4_analyze_image_requirements",
+		StartTime: startTime,
+		Status:    "RUNNING",
+	}
+
+	// 使用 defer 确保日志一定会被保存
+	defer func() {
+		endTime := time.Now()
+		agentLog.EndTime = &endTime
+		duration := int(time.Since(startTime).Milliseconds())
+		agentLog.DurationMs = &duration
+		s.agentLogService.SaveLogAsync(agentLog)
+	}()
+
 	// 构建可用配图方式说明
 	availableMethods := s.buildAvailableMethodsDescription(state.EnabledImageMethods)
 
@@ -220,9 +271,13 @@ func (s *ArticleAgentService) agent4AnalyzeImageRequirements(ctx context.Context
 	prompt = strings.ReplaceAll(prompt, "{content}", state.Content)
 	prompt = strings.ReplaceAll(prompt, "{availableMethods}", availableMethods)
 	prompt = strings.ReplaceAll(prompt, "{methodUsageGuide}", methodUsageGuide)
+	agentLog.Prompt = &prompt
 
 	content, err := llms.GenerateFromSinglePrompt(ctx, s.llm, prompt)
 	if err != nil {
+		agentLog.Status = "FAILED"
+		errMsg := err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return err
 	}
 
@@ -233,6 +288,9 @@ func (s *ArticleAgentService) agent4AnalyzeImageRequirements(ctx context.Context
 	}
 	if err := json.Unmarshal([]byte(content), &result); err != nil {
 		log.Printf("智能体4：配图需求解析失败, content=%s", content)
+		agentLog.Status = "FAILED"
+		errMsg := "parse image requirements failed: " + err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return fmt.Errorf("parse image requirements failed: %w", err)
 	}
 
@@ -242,6 +300,15 @@ func (s *ArticleAgentService) agent4AnalyzeImageRequirements(ctx context.Context
 	// 验证并过滤配图需求
 	validatedRequirements := s.validateAndFilterImageRequirements(result.ImageRequirements, state.EnabledImageMethods)
 	state.ImageRequirements = validatedRequirements
+
+	agentLog.Status = "SUCCESS"
+	// 将输出数据转换为 JSON 格式
+	outputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"requirementsCount": len(validatedRequirements),
+		"message":           fmt.Sprintf("分析出 %d 个配图需求", len(validatedRequirements)),
+	})
+	outputDataStr := string(outputDataJSON)
+	agentLog.OutputData = &outputDataStr
 
 	log.Printf("智能体4：配图需求分析成功, count=%d, validated=%d, 已在正文中插入占位符",
 		len(result.ImageRequirements), len(validatedRequirements))
@@ -258,6 +325,32 @@ func (s *ArticleAgentService) agent4AnalyzeImageRequirements(ctx context.Context
 
 // agent5GenerateImages 智能体5：生成配图（使用策略模式）
 func (s *ArticleAgentService) agent5GenerateImages(ctx context.Context, state *model.ArticleState) error {
+	// 创建日志记录
+	startTime := time.Now()
+	agentLog := &model.AgentLog{
+		TaskID:    state.TaskID,
+		AgentName: "agent5_generate_images",
+		StartTime: startTime,
+		Status:    "RUNNING",
+	}
+
+	// 使用 defer 确保日志一定会被保存
+	defer func() {
+		endTime := time.Now()
+		agentLog.EndTime = &endTime
+		duration := int(time.Since(startTime).Milliseconds())
+		agentLog.DurationMs = &duration
+		s.agentLogService.SaveLogAsync(agentLog)
+	}()
+
+	// 将输入数据转换为 JSON 格式
+	inputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"requirementsCount": len(state.ImageRequirements),
+		"message":           fmt.Sprintf("需要生成 %d 张配图", len(state.ImageRequirements)),
+	})
+	inputDataStr := string(inputDataJSON)
+	agentLog.InputData = &inputDataStr
+
 	var imageResults []model.ImageResult
 
 	for _, req := range state.ImageRequirements {
@@ -299,6 +392,14 @@ func (s *ArticleAgentService) agent5GenerateImages(ctx context.Context, state *m
 	}
 
 	state.Images = imageResults
+	agentLog.Status = "SUCCESS"
+	// 将输出数据转换为 JSON 格式
+	outputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"imagesCount": len(imageResults),
+		"message":     fmt.Sprintf("成功生成 %d 张配图", len(imageResults)),
+	})
+	outputDataStr := string(outputDataJSON)
+	agentLog.OutputData = &outputDataStr
 	log.Printf("智能体5：所有配图生成并上传完成, count=%d", len(imageResults))
 	return nil
 }
@@ -510,9 +611,28 @@ func (s *ArticleAgentService) ExecutePhase3(ctx context.Context, state *model.Ar
 
 // agent1GenerateTitleOptions 智能体1：生成标题方案（3-5个）
 func (s *ArticleAgentService) agent1GenerateTitleOptions(ctx context.Context, state *model.ArticleState) error {
+	// 创建日志记录
+	startTime := time.Now()
+	agentLog := &model.AgentLog{
+		TaskID:    state.TaskID,
+		AgentName: "agent1_generate_titles",
+		StartTime: startTime,
+		Status:    "RUNNING",
+	}
+
+	// 使用 defer 确保日志一定会被保存
+	defer func() {
+		endTime := time.Now()
+		agentLog.EndTime = &endTime
+		duration := int(time.Since(startTime).Milliseconds())
+		agentLog.DurationMs = &duration
+		s.agentLogService.SaveLogAsync(agentLog)
+	}()
+
 	// 构建 prompt
 	prompt := strings.ReplaceAll(common.Agent1TitlePrompt, "{topic}", state.Topic)
 	prompt += s.getStylePrompt(state.Style)
+	agentLog.Prompt = &prompt
 
 	log.Printf("智能体1：发送请求到 LLM, promptLength=%d", len(prompt))
 
@@ -520,6 +640,9 @@ func (s *ArticleAgentService) agent1GenerateTitleOptions(ctx context.Context, st
 	content, err := llms.GenerateFromSinglePrompt(ctx, s.llm, prompt)
 	if err != nil {
 		log.Printf("智能体1：LLM 调用失败, error=%v", err)
+		agentLog.Status = "FAILED"
+		errMsg := err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return fmt.Errorf("LLM call failed: %w", err)
 	}
 
@@ -529,18 +652,54 @@ func (s *ArticleAgentService) agent1GenerateTitleOptions(ctx context.Context, st
 	var titleOptions []model.TitleOption
 	if err := json.Unmarshal([]byte(content), &titleOptions); err != nil {
 		log.Printf("智能体1：标题方案解析失败, content=%s", content)
+		agentLog.Status = "FAILED"
+		errMsg := "parse title options: " + err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return fmt.Errorf("parse title options: %w", err)
 	}
 
 	state.TitleOptions = titleOptions
+	agentLog.Status = "SUCCESS"
+	// 将输出数据转换为 JSON 格式
+	outputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"optionsCount": len(titleOptions),
+		"message":      fmt.Sprintf("生成 %d 个标题方案", len(titleOptions)),
+	})
+	outputDataStr := string(outputDataJSON)
+	agentLog.OutputData = &outputDataStr
 	log.Printf("智能体1：标题方案生成成功, optionsCount=%d", len(titleOptions))
 	return nil
 }
 
 // AiModifyOutline AI 修改大纲
-func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, mainTitle, subTitle string, currentOutline []model.OutlineSection, modifySuggestion string) ([]model.OutlineSection, error) {
+func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, taskID, mainTitle, subTitle string, currentOutline []model.OutlineSection, modifySuggestion string) ([]model.OutlineSection, error) {
+	// 创建日志记录
+	startTime := time.Now()
+	agentLog := &model.AgentLog{
+		TaskID:    taskID,
+		AgentName: "ai_modify_outline",
+		StartTime: startTime,
+		Status:    "RUNNING",
+	}
+
+	// 使用 defer 确保日志一定会被保存
+	defer func() {
+		endTime := time.Now()
+		agentLog.EndTime = &endTime
+		duration := int(time.Since(startTime).Milliseconds())
+		agentLog.DurationMs = &duration
+		s.agentLogService.SaveLogAsync(agentLog)
+	}()
+
 	// 构建当前大纲 JSON
 	currentOutlineJSON, _ := json.Marshal(currentOutline)
+	// 将输入数据转换为 JSON 格式
+	inputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"outlineSectionsCount": len(currentOutline),
+		"suggestionLength":     len(modifySuggestion),
+	})
+	inputDataStr := string(inputDataJSON)
+	agentLog.InputData = &inputDataStr
 
 	// 构建 prompt
 	prompt := common.AiModifyOutlinePrompt
@@ -548,6 +707,7 @@ func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, mainTitle, su
 	prompt = strings.ReplaceAll(prompt, "{subTitle}", subTitle)
 	prompt = strings.ReplaceAll(prompt, "{currentOutline}", string(currentOutlineJSON))
 	prompt = strings.ReplaceAll(prompt, "{modifySuggestion}", modifySuggestion)
+	agentLog.Prompt = &prompt
 
 	log.Printf("AI修改大纲：发送请求到 LLM, promptLength=%d", len(prompt))
 
@@ -555,6 +715,9 @@ func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, mainTitle, su
 	content, err := llms.GenerateFromSinglePrompt(ctx, s.llm, prompt)
 	if err != nil {
 		log.Printf("AI修改大纲：LLM 调用失败, error=%v", err)
+		agentLog.Status = "FAILED"
+		errMsg := err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return nil, fmt.Errorf("LLM call failed: %w", err)
 	}
 
@@ -564,9 +727,20 @@ func (s *ArticleAgentService) AiModifyOutline(ctx context.Context, mainTitle, su
 	var outlineResult model.OutlineResult
 	if err := json.Unmarshal([]byte(content), &outlineResult); err != nil {
 		log.Printf("AI修改大纲：大纲解析失败, content=%s", content)
+		agentLog.Status = "FAILED"
+		errMsg := "parse outline: " + err.Error()
+		agentLog.ErrorMessage = &errMsg
 		return nil, fmt.Errorf("parse outline: %w", err)
 	}
 
+	agentLog.Status = "SUCCESS"
+	// 将输出数据转换为 JSON 格式
+	outputDataJSON, _ := json.Marshal(map[string]interface{}{
+		"sectionsCount": len(outlineResult.Sections),
+		"message":       fmt.Sprintf("修改后大纲段落数: %d", len(outlineResult.Sections)),
+	})
+	outputDataStr := string(outputDataJSON)
+	agentLog.OutputData = &outputDataStr
 	log.Printf("AI修改大纲成功, sectionsCount=%d", len(outlineResult.Sections))
 	return outlineResult.Sections, nil
 }

@@ -89,6 +89,7 @@ func main() {
 			article.POST("/confirm-outline", userAuth, application.ArticleHandler.ConfirmOutline)
 			article.POST("/ai-modify-outline", userAuth, application.ArticleHandler.AiModifyOutline)
 			article.GET("/progress/:taskId", application.ArticleHandler.GetProgress)
+			article.GET("/execution-logs/:taskId", application.ArticleHandler.GetExecutionLogs)
 			article.GET("/:taskId", userAuth, application.ArticleHandler.Get)
 			article.POST("/list", userAuth, application.ArticleHandler.List)
 			article.POST("/delete", userAuth, application.ArticleHandler.Delete)
@@ -107,6 +108,14 @@ func main() {
 		webhook := api.Group("/webhook")
 		{
 			webhook.POST("/stripe", application.WebhookHandler.HandleStripeWebhook)
+		}
+
+		// 统计路由（仅管理员）
+		adminAuth := middleware.AuthCheck(application.UserService, common.AdminRole)
+		statistics := api.Group("/statistics")
+		statistics.Use(adminAuth)
+		{
+			statistics.GET("/overview", application.StatisticsHandler.GetStatistics)
 		}
 	}
 
