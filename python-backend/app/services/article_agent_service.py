@@ -7,6 +7,8 @@ from datetime import datetime
 from typing import Callable, List, Optional
 from openai import AsyncOpenAI
 
+from app.agent.orchestrator import ArticleAgentOrchestrator
+from app.agent.parallel.image_generator import ParallelImageGenerator
 from app.config import settings
 from app.constants.prompt import PromptConstant
 from app.database import database
@@ -19,7 +21,6 @@ from app.schemas.article import (
     ImageResult,
     Agent4Result
 )
-from app.schemas.image import ImageRequest
 from app.models.enums import SseMessageTypeEnum, ImageMethodEnum, ArticleStyleEnum
 from app.services.agent_log_service import AgentLogService
 from app.services.image_service_strategy import ImageServiceStrategy
@@ -41,6 +42,12 @@ class ArticleAgentService:
         # 初始化策略模式（第 5 期改动）
         self.image_service_strategy = ImageServiceStrategy()
         self.agent_log_service = AgentLogService(database)
+        self.parallel_image_generator = ParallelImageGenerator(
+            image_service_strategy=self.image_service_strategy,
+            max_concurrency=settings.agent_image_max_concurrency,
+            fail_fast=settings.agent_image_fail_fast,
+        )
+        self.orchestrator = ArticleAgentOrchestrator()
     
     async def execute_phase1_generate_titles(
         self,
@@ -55,14 +62,7 @@ class ArticleAgentService:
             stream_handler: 流式输出处理器
         """
         try:
-            logger.info(f"阶段1：开始生成标题方案, taskId={state.task_id}")
-            await self.agent1_generate_title_options(state)
-            stream_handler(SseMessageTypeEnum.AGENT1_COMPLETE.value)
-            logger.info(
-                "阶段1：标题方案生成成功, taskId=%s, optionsCount=%s",
-                state.task_id,
-                len(state.title_options or []),
-            )
+            await self.orchestrator.execute_phase1(self, state, stream_handler)
         except Exception as e:
             logger.error(f"阶段1失败, taskId={state.task_id}, error={e}")
             raise RuntimeError(f"标题方案生成失败: {str(e)}")
@@ -74,10 +74,7 @@ class ArticleAgentService:
     ):
         """阶段2：生成大纲"""
         try:
-            logger.info(f"阶段2：开始生成大纲, taskId={state.task_id}")
-            await self.agent2_generate_outline(state, stream_handler)
-            stream_handler(SseMessageTypeEnum.AGENT2_COMPLETE.value)
-            logger.info(f"阶段2：大纲生成成功, taskId={state.task_id}")
+            await self.orchestrator.execute_phase2(self, state, stream_handler)
         except Exception as e:
             logger.error(f"阶段2失败, taskId={state.task_id}, error={e}")
             raise RuntimeError(f"大纲生成失败: {str(e)}")
@@ -89,21 +86,7 @@ class ArticleAgentService:
     ):
         """阶段3：生成正文、配图和合并内容"""
         try:
-            logger.info(f"阶段3：开始生成正文, taskId={state.task_id}")
-            await self.agent3_generate_content(state, stream_handler)
-            stream_handler(SseMessageTypeEnum.AGENT3_COMPLETE.value)
-
-            logger.info(f"阶段3：开始分析配图需求, taskId={state.task_id}")
-            await self.agent4_analyze_image_requirements(state)
-            stream_handler(SseMessageTypeEnum.AGENT4_COMPLETE.value)
-
-            logger.info(f"阶段3：开始生成配图, taskId={state.task_id}")
-            await self.agent5_generate_images(state, stream_handler)
-            stream_handler(SseMessageTypeEnum.AGENT5_COMPLETE.value)
-
-            logger.info(f"阶段3：开始图文合成, taskId={state.task_id}")
-            self.merge_images_into_content(state)
-            stream_handler(SseMessageTypeEnum.MERGE_COMPLETE.value)
+            await self.orchestrator.execute_phase3(self, state, stream_handler)
         except Exception as e:
             logger.error(f"阶段3失败, taskId={state.task_id}, error={e}")
             raise RuntimeError(f"正文生成失败: {str(e)}")
@@ -230,13 +213,15 @@ class ArticleAgentService:
             agent4_result = Agent4Result(**agent4_data)
 
             # 更新正文为包含占位符的版本
-            state.content = agent4_result.content_with_placeholders
+            state.content = self._normalize_placeholder_syntax(agent4_result.content_with_placeholders)
 
             # 验证并过滤配图需求
             validated_requirements = self._validate_and_filter_image_requirements(
                 agent4_result.image_requirements,
                 state.enabled_image_methods
             )
+            for requirement in validated_requirements:
+                requirement.placeholder_id = self._normalize_placeholder_token(requirement.placeholder_id)
 
             state.image_requirements = validated_requirements
             log_data["outputData"] = self._safe_json_dumps(
@@ -259,30 +244,17 @@ class ArticleAgentService:
         async with self._agent_log_context(
             task_id=state.task_id,
             agent_name="agent5_generate_images",
-            prompt="ImageServiceStrategy.get_image_and_upload",
+            prompt=PromptConstant.AGENT5_IMAGE_EXECUTION_PROMPT,
             input_data={"requirementsCount": len(state.image_requirements or [])},
         ) as log_data:
+            generated_pairs = await self.parallel_image_generator.generate(state.image_requirements or [])
             image_results = []
 
-            for requirement in state.image_requirements:
+            for requirement, result in generated_pairs:
                 image_source = requirement.image_source
                 logger.info(
                     f"智能体5：开始获取配图, position={requirement.position}, "
                     f"imageSource={image_source}, keywords={requirement.keywords}"
-                )
-
-                # 构建图片请求对象
-                image_request = ImageRequest(
-                    keywords=requirement.keywords,
-                    prompt=requirement.prompt,
-                    position=requirement.position,
-                    type=requirement.type
-                )
-
-                # 使用策略模式获取图片并统一上传到 COS
-                result = await self.image_service_strategy.get_image_and_upload(
-                    image_source,
-                    image_request
                 )
 
                 cos_url = result.url
@@ -304,7 +276,8 @@ class ArticleAgentService:
                     f"method={method.value}, cosUrl={cos_url}"
                 )
 
-            state.images = image_results
+            # 并行执行后按位置排序，确保输出稳定
+            state.images = sorted(image_results, key=lambda item: item.position)
             log_data["outputData"] = self._safe_json_dumps({"imagesCount": len(image_results)})
             logger.info(f"智能体5：所有配图生成并上传完成, count={len(image_results)}")
     
@@ -328,10 +301,11 @@ class ArticleAgentService:
 
             # 遍历所有配图，根据占位符替换为实际图片
             for image in images:
-                placeholder = image.placeholder_id
-                if placeholder:
+                placeholder_candidates = self._build_placeholder_candidates(image.placeholder_id)
+                if placeholder_candidates:
                     image_markdown = f"![{image.description}]({image.url})"
-                    full_content = full_content.replace(placeholder, image_markdown)
+                    for placeholder in placeholder_candidates:
+                        full_content = full_content.replace(placeholder, image_markdown)
 
             state.full_content = full_content
             log_data["outputData"] = self._safe_json_dumps({"fullContentLength": len(full_content)})
@@ -655,5 +629,45 @@ class ArticleAgentService:
             return json.dumps(value, ensure_ascii=False)
         except Exception:
             return None
+
+    @staticmethod
+    def _normalize_placeholder_token(token: Optional[str]) -> Optional[str]:
+        """将占位符归一化为双层花括号格式：{{PLACEHOLDER}}"""
+        if not token:
+            return token
+        token = token.strip()
+        if token.startswith("{{{{") and token.endswith("}}}}"):
+            inner = token[4:-4].strip()
+            return f"{{{{{inner}}}}}"
+        return token
+
+    def _build_placeholder_candidates(self, token: Optional[str]) -> List[str]:
+        """构建占位符候选（兼容双层和四层）"""
+        normalized = self._normalize_placeholder_token(token)
+        if not normalized:
+            return []
+        candidates = [normalized]
+        if normalized.startswith("{{") and normalized.endswith("}}"):
+            candidates.append("{{" + normalized + "}}")
+        # 去重，保持顺序
+        unique_candidates = []
+        for item in candidates:
+            if item not in unique_candidates:
+                unique_candidates.append(item)
+        return unique_candidates
+
+    def _normalize_placeholder_syntax(self, content: Optional[str]) -> Optional[str]:
+        """将正文中的四层占位符降级为双层，避免替换残留花括号"""
+        if not content:
+            return content
+        for index in range(1, 50):
+            image_key = f"IMAGE_PLACEHOLDER_{index}"
+            icon_key = f"ICON_PLACEHOLDER_{index}"
+            image_two = "{{" + image_key + "}}"
+            icon_two = "{{" + icon_key + "}}"
+            image_four = "{{" + image_two + "}}"
+            icon_four = "{{" + icon_two + "}}"
+            content = content.replace(image_four, image_two).replace(icon_four, icon_two)
+        return content
     
     # endregion

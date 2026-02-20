@@ -39,3 +39,9 @@ class ArticleConstant:
     
     # SVG 默认高度
     SVG_DEFAULT_HEIGHT = 600
+
+    # 第 9 期：并行配图最大并发数默认值
+    AGENT_IMAGE_MAX_CONCURRENCY = 3
+
+    # 第 9 期：并行配图失败策略（True 表示快速失败）
+    AGENT_IMAGE_FAIL_FAST = True

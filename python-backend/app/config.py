@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     svg_diagram_default_height: int = 600
     svg_diagram_folder: str = "svg-diagrams"
 
+    # 第 9 期：多智能体并行编排配置
+    agent_image_max_concurrency: int = 3
+    agent_image_fail_fast: bool = True
+
     # Stripe 支付配置（第 7 期新增）
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""

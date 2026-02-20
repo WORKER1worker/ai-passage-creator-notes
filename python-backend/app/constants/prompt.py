@@ -104,8 +104,8 @@ class PromptConstant:
 1. 识别需要配图的位置(封面、关键章节、段落之间等)
 2. 根据文章内容和结构灵活决定配图数量，避免过多或过少
 3. **在正文中插入占位符**：使用以下两种格式
-   - 普通图片占位符：{{{{IMAGE_PLACEHOLDER_N}}}}，其中 N 为配图序号（1, 2, 3...），必须独占一行
-   - Icon 占位符：{{{{ICON_PLACEHOLDER_N}}}}，可以放在文字行内任意位置（用于 ICONIFY 类型）
+   - 普通图片占位符：{{IMAGE_PLACEHOLDER_N}}，其中 N 为配图序号（1, 2, 3...），必须独占一行
+   - Icon 占位符：{{ICON_PLACEHOLDER_N}}，可以放在文字行内任意位置（用于 ICONIFY 类型）
    - 注意：position=1 的封面图不需要占位符，不要放在正文中
    - 配图占位符可以放在任意合适位置（章节标题后、段落之间、列表项中、文字行内等）
 4. **只能从上述可用的配图方式中选择**, 为每个配图选择最合适的图片来源(imageSource):
@@ -123,7 +123,7 @@ class PromptConstant:
    - keywords 留空
 8. 对于 ICONIFY 来源:
    - 识别需要图标的位置（如：列表项标记、步骤指示、重点强调、文字行内装饰等）
-   - 可以使用 {{{{ICON_PLACEHOLDER_N}}}} 放在文字行内，也可以使用 {{{{IMAGE_PLACEHOLDER_N}}}} 独占一行
+   - 可以使用 {{ICON_PLACEHOLDER_N}} 放在文字行内，也可以使用 {{IMAGE_PLACEHOLDER_N}} 独占一行
    - 提供英文图标关键词（keywords），如：check、arrow、star、heart
    - prompt 留空
 9. 对于 EMOJI_PACK 来源:
@@ -141,7 +141,7 @@ class PromptConstant:
 
 请直接返回 JSON 格式,不要有其他内容:
 {{
-  "contentWithPlaceholders": "## 章节标题1\\n\\n正文内容...\\n\\n{{{{IMAGE_PLACEHOLDER_1}}}}\\n\\n## 章节标题2\\n\\n更多正文内容... {{{{ICON_PLACEHOLDER_1}}}} 行内图标示例\\n\\n{{{{IMAGE_PLACEHOLDER_2}}}}\\n\\n...",
+  "contentWithPlaceholders": "## 章节标题1\\n\\n正文内容...\\n\\n{{IMAGE_PLACEHOLDER_1}}\\n\\n## 章节标题2\\n\\n更多正文内容... {{ICON_PLACEHOLDER_1}} 行内图标示例\\n\\n{{IMAGE_PLACEHOLDER_2}}\\n\\n...",
   "imageRequirements": [
     {{
       "position": 1,
@@ -159,7 +159,7 @@ class PromptConstant:
       "imageSource": "PEXELS",
       "keywords": "business success teamwork office",
       "prompt": "",
-      "placeholderId": "{{{{IMAGE_PLACEHOLDER_1}}}}"
+      "placeholderId": "{{IMAGE_PLACEHOLDER_1}}"
     }},
     {{
       "position": 3,
@@ -168,7 +168,7 @@ class PromptConstant:
       "imageSource": "ICONIFY",
       "keywords": "check circle",
       "prompt": "",
-      "placeholderId": "{{{{ICON_PLACEHOLDER_1}}}}"
+      "placeholderId": "{{ICON_PLACEHOLDER_1}}"
     }},
     {{
       "position": 4,
@@ -177,11 +177,14 @@ class PromptConstant:
       "imageSource": "MERMAID",
       "keywords": "",
       "prompt": "flowchart TB\\n    A[用户请求] --> B[负载均衡]\\n    B --> C[应用服务器]",
-      "placeholderId": "{{{{IMAGE_PLACEHOLDER_2}}}}"
+      "placeholderId": "{{IMAGE_PLACEHOLDER_2}}"
     }}
   ]
 }}
 """
+
+    # 第 9 期：并行配图执行说明（用于日志与编排标识）
+    AGENT5_IMAGE_EXECUTION_PROMPT = "并行执行配图生成，确保结果按 position 顺序回填。"
     
     # SVG 概念示意图生成 Prompt（第 5 期新增）
     SVG_DIAGRAM_GENERATION_PROMPT = """### 背景 ###
