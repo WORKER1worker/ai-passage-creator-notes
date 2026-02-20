@@ -1,7 +1,7 @@
 """用户 ORM 模型"""
 
 from datetime import datetime
-from sqlalchemy import Column, BigInteger, String, DateTime, SmallInteger, Text
+from sqlalchemy import Column, BigInteger, Integer, String, DateTime, SmallInteger, Text
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -19,6 +19,8 @@ class User(Base):
     user_avatar = Column("userAvatar", String(1024), nullable=True, comment="用户头像")
     user_profile = Column("userProfile", String(512), nullable=True, comment="用户简介")
     user_role = Column("userRole", String(256), nullable=False, default="user", comment="用户角色：user/admin")
+    quota = Column("quota", Integer, nullable=False, default=5, comment="剩余配额")
+    vip_time = Column("vipTime", DateTime, nullable=True, comment="成为会员时间")
     
     edit_time = Column("editTime", DateTime, nullable=False, default=func.now(), comment="编辑时间")
     create_time = Column("createTime", DateTime, nullable=False, default=func.now(), comment="创建时间")
@@ -34,6 +36,8 @@ class User(Base):
             "userAvatar": self.user_avatar,
             "userProfile": self.user_profile,
             "userRole": self.user_role,
+            "quota": self.quota,
+            "vipTime": self.vip_time.isoformat() if self.vip_time else None,
             "createTime": self.create_time.isoformat() if self.create_time else None,
             "updateTime": self.update_time.isoformat() if self.update_time else None,
         }

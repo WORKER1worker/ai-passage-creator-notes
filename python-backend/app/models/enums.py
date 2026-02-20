@@ -2,6 +2,7 @@
 
 from enum import Enum
 from typing import Optional
+from decimal import Decimal
 
 
 class ArticleStatusEnum(str, Enum):
@@ -136,3 +137,32 @@ class SseMessageTypeEnum(str, Enum):
     def get_streaming_prefix(self) -> str:
         """获取流式输出消息前缀"""
         return f"{self.value}:"
+
+
+class PaymentStatusEnum(str, Enum):
+    """支付状态枚举"""
+
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    REFUNDED = "REFUNDED"
+
+
+class ProductTypeEnum(str, Enum):
+    """产品类型枚举"""
+
+    VIP_PERMANENT = "VIP_PERMANENT"
+
+    @property
+    def description(self) -> str:
+        descriptions = {
+            ProductTypeEnum.VIP_PERMANENT: "永久会员",
+        }
+        return descriptions[self]
+
+    @property
+    def price(self) -> Decimal:
+        prices = {
+            ProductTypeEnum.VIP_PERMANENT: Decimal("199.00"),
+        }
+        return prices[self]

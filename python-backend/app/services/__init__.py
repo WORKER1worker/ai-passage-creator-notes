@@ -13,6 +13,7 @@ from app.services.emoji_pack_service import EmojiPackService
 from app.services.svg_diagram_service import SvgDiagramService
 from app.services.image_service_strategy import ImageServiceStrategy
 from app.services.image_search_service import ImageSearchService
+from app.services.payment_service import PaymentService
 
 __all__ = [
     "UserService",
@@ -28,4 +29,5 @@ __all__ = [
     "SvgDiagramService",
     "ImageServiceStrategy",
     "ImageSearchService",
+    "PaymentService",
 ]

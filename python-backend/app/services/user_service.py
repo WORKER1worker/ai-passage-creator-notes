@@ -14,8 +14,9 @@ from app.schemas.user import (
     UserVO,
     LoginUserVO
 )
+from app.constants.user import UserConstant
 from app.exceptions import ErrorCode, throw_if, throw_if_not, BusinessException
-from app.utils.password import encrypt_password, verify_password
+from app.utils.password import encrypt_password
 
 
 class UserService:
@@ -55,8 +56,8 @@ class UserService:
         
         # 插入用户
         query = """
-            INSERT INTO user (userAccount, userPassword, userName, userRole)
-            VALUES (:userAccount, :userPassword, :userName, :userRole)
+            INSERT INTO user (userAccount, userPassword, userName, userRole, quota)
+            VALUES (:userAccount, :userPassword, :userName, :userRole, :quota)
         """
         user_id = await self.db.execute(
             query=query,
@@ -64,7 +65,8 @@ class UserService:
                 "userAccount": request.user_account,
                 "userPassword": encrypted_password,
                 "userName": f"用户{request.user_account}",
-                "userRole": "user"
+                "userRole": UserConstant.DEFAULT_ROLE,
+                "quota": UserConstant.DEFAULT_QUOTA,
             }
         )
         
@@ -98,17 +100,21 @@ class UserService:
             ErrorCode.PASSWORD_ERROR,
             "密码错误"
         )
+
+        user_dict = dict(user)
         
         # 返回登录用户信息
         return LoginUserVO(
-            id=user["id"],
-            userAccount=user["userAccount"],
-            userName=user["userName"],
-            userAvatar=user["userAvatar"],
-            userProfile=user["userProfile"],
-            userRole=user["userRole"],
-            createTime=user["createTime"].isoformat(),
-            updateTime=user["updateTime"].isoformat()
+            id=user_dict["id"],
+            userAccount=user_dict["userAccount"],
+            userName=user_dict["userName"],
+            userAvatar=user_dict["userAvatar"],
+            userProfile=user_dict["userProfile"],
+            userRole=user_dict["userRole"],
+            quota=user_dict.get("quota"),
+            vipTime=user_dict["vipTime"].isoformat() if user_dict.get("vipTime") else None,
+            createTime=user_dict["createTime"].isoformat(),
+            updateTime=user_dict["updateTime"].isoformat()
         )
     
     async def get_by_id(self, user_id: int) -> Optional[UserVO]:
@@ -118,15 +124,19 @@ class UserService:
         
         if not user:
             return None
+
+        user_dict = dict(user)
         
         return UserVO(
-            id=user["id"],
-            userAccount=user["userAccount"],
-            userName=user["userName"],
-            userAvatar=user["userAvatar"],
-            userProfile=user["userProfile"],
-            userRole=user["userRole"],
-            createTime=user["createTime"].isoformat()
+            id=user_dict["id"],
+            userAccount=user_dict["userAccount"],
+            userName=user_dict["userName"],
+            userAvatar=user_dict["userAvatar"],
+            userProfile=user_dict["userProfile"],
+            userRole=user_dict["userRole"],
+            quota=user_dict.get("quota"),
+            vipTime=user_dict["vipTime"].isoformat() if user_dict.get("vipTime") else None,
+            createTime=user_dict["createTime"].isoformat()
         )
     
     async def list_by_page(self, request: UserQueryRequest) -> Tuple[List[UserVO], int]:
@@ -169,18 +179,22 @@ class UserService:
         
         users = await self.db.fetch_all(query)
         
-        user_list = [
-            UserVO(
-                id=user["id"],
-                userAccount=user["userAccount"],
-                userName=user["userName"],
-                userAvatar=user["userAvatar"],
-                userProfile=user["userProfile"],
-                userRole=user["userRole"],
-                createTime=user["createTime"].isoformat()
+        user_list = []
+        for user in users:
+            user_dict = dict(user)
+            user_list.append(
+                UserVO(
+                    id=user_dict["id"],
+                    userAccount=user_dict["userAccount"],
+                    userName=user_dict["userName"],
+                    userAvatar=user_dict["userAvatar"],
+                    userProfile=user_dict["userProfile"],
+                    userRole=user_dict["userRole"],
+                    quota=user_dict.get("quota"),
+                    vipTime=user_dict["vipTime"].isoformat() if user_dict.get("vipTime") else None,
+                    createTime=user_dict["createTime"].isoformat()
+                )
             )
-            for user in users
-        ]
         
         return user_list, total
     
@@ -198,8 +212,8 @@ class UserService:
         
         # 插入用户
         query = """
-            INSERT INTO user (userAccount, userPassword, userName, userAvatar, userProfile, userRole)
-            VALUES (:userAccount, :userPassword, :userName, :userAvatar, :userProfile, :userRole)
+            INSERT INTO user (userAccount, userPassword, userName, userAvatar, userProfile, userRole, quota)
+            VALUES (:userAccount, :userPassword, :userName, :userAvatar, :userProfile, :userRole, :quota)
         """
         user_id = await self.db.execute(
             query=query,
@@ -209,7 +223,8 @@ class UserService:
                 "userName": request.user_name or f"用户{request.user_account}",
                 "userAvatar": request.user_avatar,
                 "userProfile": request.user_profile,
-                "userRole": request.user_role
+                "userRole": request.user_role,
+                "quota": UserConstant.DEFAULT_QUOTA,
             }
         )
         

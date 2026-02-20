@@ -24,6 +24,7 @@ dependencies = [
     "google-genai==1.35.0",
     "beautifulsoup4==4.12.3",
     "lxml==5.3.0",
+    "stripe>=14.3.0",
 ]
 
 [build-system]
